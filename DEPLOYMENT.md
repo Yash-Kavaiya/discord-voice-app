@@ -266,8 +266,8 @@ chmod 755 data/
 ```
 
 ### 4. Rate Limiting
-- Monitor OpenAI API usage
-- Set spending limits in OpenAI dashboard
+- Monitor Google Gemini API usage
+- Check quota limits in Google Cloud Console
 - Implement request queuing if needed
 
 ## 📊 Monitoring
@@ -443,10 +443,12 @@ DATABASE_PATH=./data/test.db
 
 ## 💰 Cost Estimation
 
-### OpenAI Whisper API
-- $0.006 per minute of audio
-- 1 hour of conversation = ~$0.36
-- 10 hours/day = ~$3.60/day = ~$108/month
+### Google Gemini API
+- Gemini 1.5 Flash: Free tier available, then paid tier
+- Free tier: 15 requests per minute (RPM), 1 million tokens per day
+- Paid tier varies by usage and model
+- Audio processing is included in context window pricing
+- Check [Google AI Pricing](https://ai.google.dev/pricing) for latest rates
 
 ### Server Costs
 - Small VPS (1GB RAM): $5-10/month
@@ -454,9 +456,9 @@ DATABASE_PATH=./data/test.db
 - Storage: Minimal (transcripts are text)
 
 ### Total Monthly Cost
-- Small usage: $15-30/month
-- Medium usage: $50-150/month
-- Heavy usage: $200+/month
+- Small usage (within free tier): $5-10/month (server only)
+- Medium usage: $20-50/month
+- Heavy usage: $100+/month
 
 ---
 
