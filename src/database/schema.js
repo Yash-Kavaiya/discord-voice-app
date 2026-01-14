@@ -1,23 +1,42 @@
-const Database = require('better-sqlite3');
+const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
 
 class DatabaseSchema {
-  constructor(dbPath) {
+  constructor() {
+    this.db = null;
+    this.dbPath = null;
+    this.initialized = false;
+  }
+
+  async initialize(dbPath) {
     // Ensure data directory exists
     const dataDir = path.dirname(dbPath);
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL'); // Better concurrency
+    this.dbPath = dbPath;
+
+    // Initialize SQL.js
+    const SQL = await initSqlJs();
+
+    // Load existing database or create new one
+    if (fs.existsSync(dbPath)) {
+      const fileBuffer = fs.readFileSync(dbPath);
+      this.db = new SQL.Database(fileBuffer);
+    } else {
+      this.db = new SQL.Database();
+    }
+
     this.initializeTables();
+    this.initialized = true;
+    return this;
   }
 
   initializeTables() {
     // Sessions table - tracks voice channel sessions
-    this.db.exec(`
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT UNIQUE NOT NULL,
@@ -35,7 +54,7 @@ class DatabaseSchema {
     `);
 
     // Participants table - tracks who was in each session
-    this.db.exec(`
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS participants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
@@ -49,7 +68,7 @@ class DatabaseSchema {
     `);
 
     // Transcriptions table - stores transcribed text
-    this.db.exec(`
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS transcriptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
@@ -68,7 +87,7 @@ class DatabaseSchema {
     `);
 
     // Analytics table - stores computed analytics
-    this.db.exec(`
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS analytics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
@@ -86,7 +105,7 @@ class DatabaseSchema {
     `);
 
     // Reports table - tracks generated reports
-    this.db.exec(`
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS reports (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         report_id TEXT UNIQUE NOT NULL,
@@ -101,18 +120,16 @@ class DatabaseSchema {
     `);
 
     // Create indexes for better query performance
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_sessions_guild ON sessions(guild_id);
-      CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-      CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time);
-      CREATE INDEX IF NOT EXISTS idx_participants_session ON participants(session_id);
-      CREATE INDEX IF NOT EXISTS idx_participants_user ON participants(user_id);
-      CREATE INDEX IF NOT EXISTS idx_transcriptions_session ON transcriptions(session_id);
-      CREATE INDEX IF NOT EXISTS idx_transcriptions_timestamp ON transcriptions(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics(session_id);
-      CREATE INDEX IF NOT EXISTS idx_reports_type ON reports(report_type);
-      CREATE INDEX IF NOT EXISTS idx_reports_date ON reports(report_date);
-    `);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_guild ON sessions(guild_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_participants_session ON participants(session_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_participants_user ON participants(user_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_transcriptions_session ON transcriptions(session_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_transcriptions_timestamp ON transcriptions(timestamp)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics(session_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_reports_type ON reports(report_type)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_reports_date ON reports(report_date)`);
 
     console.log('✅ Database schema initialized successfully');
   }
@@ -121,8 +138,19 @@ class DatabaseSchema {
     return this.db;
   }
 
+  save() {
+    if (this.db && this.dbPath) {
+      const data = this.db.export();
+      const buffer = Buffer.from(data);
+      fs.writeFileSync(this.dbPath, buffer);
+    }
+  }
+
   close() {
-    this.db.close();
+    this.save();
+    if (this.db) {
+      this.db.close();
+    }
   }
 }
 

@@ -7,12 +7,17 @@ const absolutePath = path.resolve(dbPath);
 
 console.log('Initializing database at:', absolutePath);
 
-try {
-  const dbSchema = new DatabaseSchema(absolutePath);
-  console.log('✅ Database initialized successfully!');
-  dbSchema.close();
-  process.exit(0);
-} catch (error) {
-  console.error('❌ Error initializing database:', error);
-  process.exit(1);
+async function initDatabase() {
+  try {
+    const dbSchema = new DatabaseSchema();
+    await dbSchema.initialize(absolutePath);
+    console.log('✅ Database initialized successfully!');
+    dbSchema.close();
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Error initializing database:', error);
+    process.exit(1);
+  }
 }
+
+initDatabase();

@@ -20,12 +20,8 @@ const CommandHandler = require('./commands/commandHandler');
 
 class VoiceTranscriptionBot {
   constructor() {
-    this.validateConfig();
-    this.initializeDatabase();
-    this.initializeServices();
-    this.initializeClient();
-    this.setupEventHandlers();
-    this.setupCronJobs();
+    this.dbSchema = null;
+    this.db = null;
   }
 
   validateConfig() {
@@ -41,12 +37,13 @@ class VoiceTranscriptionBot {
     console.log('✅ Configuration validated');
   }
 
-  initializeDatabase() {
+  async initializeDatabase() {
     const dbPath = path.resolve(process.env.DATABASE_PATH || './data/transcriptions.db');
     console.log('📂 Database path:', dbPath);
 
-    const dbSchema = new DatabaseSchema(dbPath);
-    this.db = new DatabaseQueries(dbSchema.getDatabase());
+    this.dbSchema = new DatabaseSchema();
+    await this.dbSchema.initialize(dbPath);
+    this.db = new DatabaseQueries(this.dbSchema.getDatabase(), () => this.dbSchema.save());
 
     console.log('✅ Database initialized');
   }
@@ -70,6 +67,57 @@ class VoiceTranscriptionBot {
       this.sessionManager,
       this.audioRecorder
     );
+
+    // Listen for session end to generate report
+    this.voiceHandler.on('sessionEnded', async ({ sessionId, channel, guild }) => {
+      console.log(`📊 Generating report for session ${sessionId}...`);
+      try {
+        const report = await this.sessionManager.generateSessionReport(sessionId, channel);
+        if (report) {
+          // Find text channel to send report
+          let targetChannel = null;
+          if (process.env.REPORT_CHANNEL_ID) {
+            targetChannel = guild.channels.cache.get(process.env.REPORT_CHANNEL_ID);
+          }
+          if (!targetChannel) {
+            // Try to send to the text channel where the voice channel is (if it has one?) 
+            // Or just a guess based on name
+            targetChannel = guild.channels.cache.find(
+              ch => ch.isTextBased() &&
+                (ch.name === channel.name || ch.name.includes('general') || ch.name.includes('transcripts')) &&
+                ch.permissionsFor(guild.members.me).has('SendMessages')
+            );
+          }
+          if (!targetChannel) {
+            targetChannel = guild.systemChannel;
+          }
+
+          if (targetChannel) {
+            await targetChannel.send({
+              content: `📝 **Meeting Report: ${channel.name}**`,
+              embeds: [report.embed]
+            });
+
+            if (report.transcript && report.transcript.length > 0) {
+              // Send transcript as file if too long, or message
+              if (report.transcript.length > 1900) {
+                const buffer = Buffer.from(report.transcript, 'utf-8');
+                await targetChannel.send({
+                  files: [{ attachment: buffer, name: `transcript-${sessionId}.txt` }]
+                });
+              } else {
+                await targetChannel.send(`\`\`\`\n${report.transcript}\n\`\`\``);
+              }
+            }
+            console.log(`✅ Sent report to #${targetChannel.name}`);
+          } else {
+            console.warn('⚠️ Could not find a text channel to send the report');
+          }
+        }
+      } catch (error) {
+        console.error('Error generating/sending session report:', error);
+      }
+    });
 
     this.commandHandler = new CommandHandler(
       this.voiceHandler,
@@ -143,8 +191,23 @@ class VoiceTranscriptionBot {
 
       // User joined a voice channel
       if (!oldState.channel && newState.channel) {
-        // Only handle if bot is already in this channel
-        if (this.voiceHandler.hasConnection(newState.channel.id)) {
+        // Auto-join: If bot is NOT in this channel, join it automatically
+        if (!this.voiceHandler.hasConnection(newState.channel.id)) {
+          console.log(`🎙️  Auto-joining voice channel: ${newState.channel.name}`);
+          try {
+            await this.voiceHandler.joinChannel(newState.channel, newState.guild);
+            // Find a text channel to send notification
+            const textChannel = newState.guild.channels.cache.find(
+              ch => ch.isTextBased() && ch.permissionsFor(newState.guild.members.me).has('SendMessages')
+            );
+            if (textChannel) {
+              await textChannel.send(`🎙️ Auto-joined **${newState.channel.name}** - Recording started!`);
+            }
+          } catch (error) {
+            console.error('Error auto-joining channel:', error);
+          }
+        } else {
+          // Bot already in channel, just handle the user join
           await this.voiceHandler.handleUserJoin(member, newState.channel);
         }
       }
@@ -163,8 +226,21 @@ class VoiceTranscriptionBot {
           await this.voiceHandler.handleUserLeave(member, oldState.channel);
         }
 
-        // Joined new channel
-        if (this.voiceHandler.hasConnection(newState.channel.id)) {
+        // Joined new channel - auto-join if not already there
+        if (!this.voiceHandler.hasConnection(newState.channel.id)) {
+          console.log(`🎙️  Auto-joining voice channel: ${newState.channel.name}`);
+          try {
+            await this.voiceHandler.joinChannel(newState.channel, newState.guild);
+            const textChannel = newState.guild.channels.cache.find(
+              ch => ch.isTextBased() && ch.permissionsFor(newState.guild.members.me).has('SendMessages')
+            );
+            if (textChannel) {
+              await textChannel.send(`🎙️ Auto-joined **${newState.channel.name}** - Recording started!`);
+            }
+          } catch (error) {
+            console.error('Error auto-joining channel:', error);
+          }
+        } else {
           await this.voiceHandler.handleUserJoin(member, newState.channel);
         }
       }
@@ -255,6 +331,11 @@ class VoiceTranscriptionBot {
         await this.voiceHandler.leaveChannel(conn.channel.id);
       }
 
+      // Save and close database
+      if (this.dbSchema) {
+        this.dbSchema.close();
+      }
+
       // Disconnect from Discord
       this.client.destroy();
 
@@ -266,14 +347,25 @@ class VoiceTranscriptionBot {
     }
   }
 
-  start() {
+  async start() {
     console.log('🚀 Starting Voice Transcription Bot...');
+
+    this.validateConfig();
+    await this.initializeDatabase();
+    this.initializeServices();
+    this.initializeClient();
+    this.setupEventHandlers();
+    this.setupCronJobs();
+
     this.client.login(process.env.DISCORD_TOKEN);
   }
 }
 
 // Start the bot
 const bot = new VoiceTranscriptionBot();
-bot.start();
+bot.start().catch(error => {
+  console.error('❌ Failed to start bot:', error);
+  process.exit(1);
+});
 
 module.exports = VoiceTranscriptionBot;

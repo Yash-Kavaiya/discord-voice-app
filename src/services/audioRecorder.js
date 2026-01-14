@@ -1,6 +1,5 @@
 const { createWriteStream } = require('fs');
 const { pipeline } = require('stream');
-const { OpusEncoder } = require('@discordjs/opus');
 const prism = require('prism-media');
 const path = require('path');
 const fs = require('fs');
@@ -43,6 +42,10 @@ class AudioRecorder {
   handleAudioData(userId, audioChunk) {
     const recording = this.recordings.get(userId);
     if (recording && recording.stream) {
+      // Log every 50 chunks to avoid spam, or if it's the first one
+      if (recording.chunks.length === 0 || recording.chunks.length % 50 === 0) {
+        console.log(`🎤 Receiving audio chunk for ${userId}: ${audioChunk.length} bytes. Total chunks: ${recording.chunks.length + 1}`);
+      }
       recording.stream.write(audioChunk);
       recording.chunks.push(audioChunk);
     }
@@ -81,30 +84,42 @@ class AudioRecorder {
     return new Promise((resolve, reject) => {
       const ffmpeg = require('fluent-ffmpeg');
       const ffmpegPath = require('ffmpeg-static');
+
+      console.log('ffmpeg path:', ffmpegPath);
+      if (!fs.existsSync(ffmpegPath)) {
+        console.error('❌ FFmpeg binary not found at:', ffmpegPath);
+        return reject(new Error('FFmpeg binary not found'));
+      }
+
       ffmpeg.setFfmpegPath(ffmpegPath);
 
-      ffmpeg()
-        .input(recording.filepath)
-        .inputFormat('s16le') // PCM 16-bit little-endian
-        .inputOptions([
-          '-ar 48000', // Sample rate
-          '-ac 2'      // Stereo
-        ])
-        .output(wavPath)
-        .audioCodec('pcm_s16le')
-        .on('end', () => {
-          console.log(`✅ Converted ${recording.filename} to WAV format`);
-          // Delete the PCM file to save space
-          fs.unlink(recording.filepath, (err) => {
-            if (err) console.error('Error deleting PCM file:', err);
-          });
-          resolve(wavPath);
-        })
-        .on('error', (err) => {
-          console.error('Error converting to WAV:', err);
-          reject(err);
-        })
-        .run();
+      try {
+        ffmpeg()
+          .input(recording.filepath)
+          .inputFormat('s16le') // PCM 16-bit little-endian
+          .inputOptions([
+            '-ar 48000', // Sample rate
+            '-ac 2'      // Stereo
+          ])
+          .output(wavPath)
+          .audioCodec('pcm_s16le')
+          .on('end', () => {
+            console.log(`✅ Converted ${recording.filename} to WAV format`);
+            // Delete the PCM file to save space
+            fs.unlink(recording.filepath, (err) => {
+              if (err) console.error('Error deleting PCM file:', err);
+            });
+            resolve(wavPath);
+          })
+          .on('error', (err) => {
+            console.error('Error converting to WAV:', err);
+            reject(err);
+          })
+          .run();
+      } catch (error) {
+        console.error('Error initializing FFmpeg:', error);
+        reject(error);
+      }
     });
   }
 

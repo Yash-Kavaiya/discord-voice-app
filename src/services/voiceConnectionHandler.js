@@ -5,9 +5,13 @@ const {
   getVoiceConnection,
   entersState
 } = require('@discordjs/voice');
+const prism = require('prism-media');
 
-class VoiceConnectionHandler {
+const { EventEmitter } = require('events');
+
+class VoiceConnectionHandler extends EventEmitter {
   constructor(sessionManager, audioRecorder) {
+    super();
     this.sessionManager = sessionManager;
     this.audioRecorder = audioRecorder;
     this.connections = new Map(); // channelId -> connection
@@ -57,6 +61,26 @@ class VoiceConnectionHandler {
         }
       });
 
+      // Add error handling listeners
+      connection.on('error', (error) => {
+        console.error('❌ Voice Connection Error:', error);
+        this.leaveChannel(channel.id).catch(console.error);
+      });
+
+      connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
+        console.warn('⚠️ Connection disconnected. Attempting to reconnect...');
+        try {
+          await Promise.race([
+            entersState(connection, VoiceConnectionStatus.Signalling, 5000),
+            entersState(connection, VoiceConnectionStatus.Connecting, 5000),
+          ]);
+          console.log('✅ Reconnected');
+        } catch (error) {
+          console.error('❌ Failed to reconnect, destroying connection');
+          this.leaveChannel(channel.id).catch(console.error);
+        }
+      });
+
       console.log(`✅ Successfully joined ${channel.name} - Session: ${sessionId}`);
 
       return connection;
@@ -72,7 +96,7 @@ class VoiceConnectionHandler {
     // Listen for users speaking
     receiver.speaking.on('start', (userId) => {
       // Create audio stream for this user
-      const audio = receiver.subscribe(userId, {
+      const opusStream = receiver.subscribe(userId, {
         end: {
           behavior: EndBehaviorType.AfterSilence,
           duration: 300 // 300ms of silence ends the stream
@@ -81,18 +105,30 @@ class VoiceConnectionHandler {
 
       // Check if we're already recording this user
       if (!this.audioRecorder.isRecording(userId)) {
-        console.log(`🎤 User ${userId} started speaking (no active recording)`);
+        // console.log(`🎤 User ${userId} started speaking (no active recording)`);
         return;
       }
 
-      // Handle audio data
-      audio.on('data', (chunk) => {
-        this.audioRecorder.handleAudioData(userId, chunk);
-      });
+      try {
+        // Decode Opus to PCM
+        const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+        const pcmStream = opusStream.pipe(decoder);
 
-      audio.on('error', (error) => {
-        console.error(`Audio stream error for user ${userId}:`, error);
-      });
+        // Handle PCM data
+        pcmStream.on('data', (chunk) => {
+          this.audioRecorder.handleAudioData(userId, chunk);
+        });
+
+        pcmStream.on('error', (error) => {
+          console.error(`Audio decode error for user ${userId}:`, error);
+        });
+
+        opusStream.on('error', (error) => {
+          console.error(`Opus stream error for user ${userId}:`, error);
+        });
+      } catch (error) {
+        console.error(`Error setting up decoder for ${userId}:`, error);
+      }
     });
 
     this.receivers.set(channel.id, receiver);
@@ -119,6 +155,13 @@ class VoiceConnectionHandler {
       this.receivers.delete(channelId);
 
       console.log(`✅ Left channel and ended session: ${connectionData.sessionId}`);
+
+      // Emit session ended event for report generation
+      this.emit('sessionEnded', {
+        sessionId: connectionData.sessionId,
+        channel: connectionData.channel,
+        guild: connectionData.guild
+      });
 
       return connectionData.sessionId;
     } catch (error) {

@@ -1,16 +1,39 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { VertexAI } = require('@google-cloud/vertexai');
 const fs = require('fs');
 
 class TranscriptionService {
   constructor(apiKey) {
-    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.useVertexAI = process.env.USE_VERTEX_AI === 'true';
     this.model = process.env.TRANSCRIPTION_MODEL || 'gemini-1.5-flash';
     this.language = process.env.TRANSCRIPTION_LANGUAGE || 'en';
+    
+    if (this.useVertexAI) {
+      // Initialize Vertex AI
+      const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
+      const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+      
+      if (!projectId) {
+        console.warn('⚠️  GOOGLE_CLOUD_PROJECT not set, falling back to API key');
+        this.useVertexAI = false;
+        this.genAI = new GoogleGenerativeAI(apiKey);
+      } else {
+        console.log(`✅ Using Vertex AI with project: ${projectId}, location: ${location}`);
+        this.vertexAI = new VertexAI({
+          project: projectId,
+          location: location
+        });
+      }
+    } else {
+      // Use standard Gemini API with key
+      this.genAI = new GoogleGenerativeAI(apiKey);
+    }
   }
 
   async transcribeAudio(audioPath, options = {}) {
     try {
-      console.log(`🎤 Transcribing audio with Gemini: ${audioPath}`);
+      const serviceName = this.useVertexAI ? 'Vertex AI' : 'Gemini API';
+      console.log(`🎤 Transcribing audio with ${serviceName}: ${audioPath}`);
 
       // Check if file exists and has content
       const stats = fs.statSync(audioPath);
@@ -24,7 +47,7 @@ class TranscriptionService {
         };
       }
 
-      // Gemini has file size limits (20MB for audio)
+      // File size limits (20MB for audio)
       const maxSize = 20 * 1024 * 1024; // 20MB
       if (stats.size > maxSize) {
         console.warn(`⚠️  Audio file too large (${(stats.size / 1024 / 1024).toFixed(2)}MB), splitting required`);
@@ -36,9 +59,16 @@ class TranscriptionService {
       const base64Audio = audioData.toString('base64');
 
       // Get the generative model
-      const model = this.genAI.getGenerativeModel({
-        model: this.model
-      });
+      let model;
+      if (this.useVertexAI) {
+        model = this.vertexAI.getGenerativeModel({
+          model: this.model
+        });
+      } else {
+        model = this.genAI.getGenerativeModel({
+          model: this.model
+        });
+      }
 
       // Prepare the prompt for transcription
       const languageInstruction = options.language || this.language;
@@ -67,7 +97,7 @@ Be precise and include all spoken words.`;
       // Estimate duration based on file size (approximate)
       const estimatedDuration = stats.size / (48000 * 2 * 2); // 48kHz, 16-bit, stereo
 
-      console.log(`✅ Gemini transcription complete: ${wordCount} words`);
+      console.log(`✅ ${serviceName} transcription complete: ${wordCount} words`);
 
       return {
         text: transcriptionText || '',
@@ -77,7 +107,7 @@ Be precise and include all spoken words.`;
         confidence: this.calculateConfidence(transcriptionText, wordCount)
       };
     } catch (error) {
-      console.error('❌ Gemini transcription error:', error.message);
+      console.error('❌ Transcription error:', error.message);
 
       // Return empty transcription on error
       return {
