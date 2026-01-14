@@ -5,7 +5,7 @@ A comprehensive Discord bot that listens to voice channels, records conversation
 ## ✨ Features
 
 - 🎤 **Voice Recording**: Automatically records audio from voice channels
-- 📝 **Speech-to-Text**: Transcribes voice conversations using OpenAI's Whisper API
+- 📝 **Speech-to-Text**: Transcribes voice conversations using Google's Gemini AI
 - 📊 **Analytics Engine**: Analyzes conversations for insights
   - Speaker statistics and engagement metrics
   - Topic identification and keyword extraction
@@ -21,7 +21,7 @@ A comprehensive Discord bot that listens to voice channels, records conversation
 
 - **Node.js** v16 or higher
 - **Discord Bot Account** with proper permissions
-- **OpenAI API Key** for Whisper transcription service
+- **Google Gemini API Key** for AI transcription service
 - **FFmpeg** installed on your system
 
 ## 🚀 Quick Start
@@ -74,13 +74,13 @@ Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH
    - Use Voice Activity
 9. Copy the generated URL and use it to invite the bot to your server
 
-### 5. Get OpenAI API Key
+### 5. Get Google Gemini API Key
 
-1. Go to [OpenAI Platform](https://platform.openai.com/)
-2. Sign up or log in
-3. Go to API Keys section
-4. Create a new API key
-5. Copy the key (you won't be able to see it again!)
+1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. Sign in with your Google account
+3. Click "Create API Key"
+4. Select or create a Google Cloud project
+5. Copy the generated API key
 
 ### 6. Configure Environment Variables
 
@@ -95,7 +95,7 @@ Edit `.env` and fill in your credentials:
 ```env
 DISCORD_TOKEN=your_discord_bot_token_here
 DISCORD_CLIENT_ID=your_discord_client_id_here
-OPENAI_API_KEY=your_openai_api_key_here
+GOOGLE_API_KEY=your_google_gemini_api_key_here
 ```
 
 ### 7. Initialize Database
@@ -179,10 +179,11 @@ Bot: [Sends detailed report with transcript and analytics]
 |----------|-------------|---------|
 | `DISCORD_TOKEN` | Your Discord bot token | Required |
 | `DISCORD_CLIENT_ID` | Your Discord application client ID | Required |
-| `OPENAI_API_KEY` | Your OpenAI API key | Required |
+| `GOOGLE_API_KEY` | Your Google Gemini API key | Required |
 | `COMMAND_PREFIX` | Command prefix for bot commands | `!` |
 | `DATABASE_PATH` | Path to SQLite database file | `./data/transcriptions.db` |
 | `TRANSCRIPTION_LANGUAGE` | Language code for transcription | `en` |
+| `TRANSCRIPTION_MODEL` | Gemini model to use | `gemini-1.5-flash` |
 | `MIN_SESSION_DURATION` | Minimum session duration (seconds) for reports | `60` |
 | `DAILY_REPORT_TIME` | Time to send daily reports (24h format) | `23:00` |
 | `REPORT_CHANNEL_ID` | Channel ID for daily reports (optional) | None |
@@ -209,7 +210,7 @@ The bot uses SQLite with the following tables:
 - The bot only records when explicitly invited to a voice channel
 - Audio files are stored temporarily and can be configured to auto-delete
 - Transcripts are stored in a local database
-- No data is shared with third parties except OpenAI for transcription
+- No data is shared with third parties except Google Gemini for transcription
 - Users can see when the bot is in their channel
 
 ## 🛠️ Development
@@ -224,7 +225,7 @@ discord-voice-app/
 │   │   └── commandHandler.js    # Command processing
 │   ├── services/
 │   │   ├── audioRecorder.js     # Audio recording service
-│   │   ├── transcriptionService.js  # OpenAI Whisper integration
+│   │   ├── transcriptionService.js  # Google Gemini AI integration
 │   │   ├── analyticsEngine.js   # Analytics computation
 │   │   ├── reportGenerator.js   # Report generation
 │   │   ├── sessionManager.js    # Session management
@@ -258,9 +259,10 @@ The codebase is modular and easy to extend:
 - Verify the bot token is correct
 
 ### Transcription fails
-- Verify your OpenAI API key is valid and has credits
+- Verify your Google Gemini API key is valid and active
 - Check that audio files are being created in the `recordings/` directory
 - Ensure FFmpeg is installed and in your PATH
+- Verify you haven't exceeded Gemini API rate limits
 
 ### No audio is recorded
 - Install `@discordjs/opus` or `opusscript`
@@ -301,7 +303,7 @@ For issues, questions, or suggestions:
 ## 🙏 Acknowledgments
 
 - Built with [Discord.js](https://discord.js.org/)
-- Transcription powered by [OpenAI Whisper](https://openai.com/research/whisper)
+- Transcription powered by [Google Gemini AI](https://ai.google.dev/)
 - Voice handling with [@discordjs/voice](https://github.com/discordjs/voice)
 
 ---

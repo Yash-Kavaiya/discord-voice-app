@@ -1,18 +1,16 @@
-const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 
 class TranscriptionService {
   constructor(apiKey) {
-    this.openai = new OpenAI({
-      apiKey: apiKey
-    });
-    this.model = process.env.TRANSCRIPTION_MODEL || 'whisper-1';
+    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.model = process.env.TRANSCRIPTION_MODEL || 'gemini-1.5-flash';
     this.language = process.env.TRANSCRIPTION_LANGUAGE || 'en';
   }
 
   async transcribeAudio(audioPath, options = {}) {
     try {
-      console.log(`🎤 Transcribing audio: ${audioPath}`);
+      console.log(`🎤 Transcribing audio with Gemini: ${audioPath}`);
 
       // Check if file exists and has content
       const stats = fs.statSync(audioPath);
@@ -26,35 +24,60 @@ class TranscriptionService {
         };
       }
 
-      // Whisper API has a 25MB file size limit
-      const maxSize = 25 * 1024 * 1024; // 25MB
+      // Gemini has file size limits (20MB for audio)
+      const maxSize = 20 * 1024 * 1024; // 20MB
       if (stats.size > maxSize) {
         console.warn(`⚠️  Audio file too large (${(stats.size / 1024 / 1024).toFixed(2)}MB), splitting required`);
         return await this.transcribeLargeFile(audioPath, options);
       }
 
-      const transcription = await this.openai.audio.transcriptions.create({
-        file: fs.createReadStream(audioPath),
-        model: this.model,
-        language: options.language || this.language,
-        response_format: 'verbose_json',
-        timestamp_granularities: ['word']
+      // Read the audio file
+      const audioData = fs.readFileSync(audioPath);
+      const base64Audio = audioData.toString('base64');
+
+      // Get the generative model
+      const model = this.genAI.getGenerativeModel({
+        model: this.model
       });
 
-      const wordCount = transcription.text ? transcription.text.split(/\s+/).filter(word => word.length > 0).length : 0;
+      // Prepare the prompt for transcription
+      const languageInstruction = options.language || this.language;
+      const prompt = `Transcribe the following audio accurately.
+The audio is in ${languageInstruction} language.
+Provide only the transcription text without any additional commentary or formatting.
+Be precise and include all spoken words.`;
 
-      console.log(`✅ Transcription complete: ${wordCount} words`);
+      // Create the request with audio data
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            mimeType: 'audio/wav',
+            data: base64Audio
+          }
+        },
+        { text: prompt }
+      ]);
+
+      const response = await result.response;
+      const transcriptionText = response.text();
+
+      // Calculate statistics
+      const wordCount = transcriptionText ? transcriptionText.split(/\s+/).filter(word => word.length > 0).length : 0;
+
+      // Estimate duration based on file size (approximate)
+      const estimatedDuration = stats.size / (48000 * 2 * 2); // 48kHz, 16-bit, stereo
+
+      console.log(`✅ Gemini transcription complete: ${wordCount} words`);
 
       return {
-        text: transcription.text || '',
-        language: transcription.language,
-        duration: transcription.duration,
+        text: transcriptionText || '',
+        language: languageInstruction,
+        duration: estimatedDuration,
         wordCount: wordCount,
-        words: transcription.words || [],
-        confidence: this.calculateConfidence(transcription)
+        confidence: this.calculateConfidence(transcriptionText, wordCount)
       };
     } catch (error) {
-      console.error('❌ Transcription error:', error.message);
+      console.error('❌ Gemini transcription error:', error.message);
 
       // Return empty transcription on error
       return {
@@ -68,32 +91,55 @@ class TranscriptionService {
   }
 
   async transcribeLargeFile(audioPath, options = {}) {
-    // For large files, we would need to split them
-    // For now, return an error message
-    console.error('❌ Large file transcription not yet implemented');
-    return {
-      text: '[Audio file too large for transcription]',
-      duration: 0,
-      wordCount: 0,
-      confidence: 0
-    };
+    try {
+      console.log('📦 Processing large audio file...');
+
+      // For large files, we can chunk them
+      // For now, try with the file directly but with a warning
+      const stats = fs.statSync(audioPath);
+
+      // If extremely large, reject
+      if (stats.size > 50 * 1024 * 1024) {
+        console.error('❌ Audio file too large (>50MB)');
+        return {
+          text: '[Audio file too large for transcription (max 50MB)]',
+          duration: 0,
+          wordCount: 0,
+          confidence: 0
+        };
+      }
+
+      // Try to transcribe anyway
+      return await this.transcribeAudio(audioPath, options);
+    } catch (error) {
+      console.error('❌ Large file transcription error:', error);
+      return {
+        text: '[Large file transcription failed]',
+        duration: 0,
+        wordCount: 0,
+        confidence: 0
+      };
+    }
   }
 
-  calculateConfidence(transcription) {
-    // Whisper doesn't provide confidence scores directly
-    // We can estimate based on the presence of words and duration
-    if (!transcription.text || transcription.text.length === 0) {
+  calculateConfidence(transcriptionText, wordCount) {
+    // Estimate confidence based on response quality
+    if (!transcriptionText || transcriptionText.length === 0) {
+      return 0;
+    }
+
+    // Check for error indicators
+    if (transcriptionText.includes('[Transcription failed')) {
       return 0;
     }
 
     // Basic heuristic: longer transcriptions with more words tend to be more reliable
-    const wordCount = transcription.text.split(/\s+/).length;
-    const hasWords = transcription.words && transcription.words.length > 0;
-
-    if (hasWords && wordCount > 10) {
+    if (wordCount > 20) {
       return 0.9;
+    } else if (wordCount > 10) {
+      return 0.8;
     } else if (wordCount > 5) {
-      return 0.75;
+      return 0.7;
     } else if (wordCount > 0) {
       return 0.6;
     }
@@ -125,6 +171,13 @@ class TranscriptionService {
     } catch (error) {
       console.error('Error cleaning up audio file:', error);
     }
+  }
+
+  // Alternative method using streaming for very large files
+  async transcribeWithChunking(audioPath, options = {}) {
+    // This could be implemented for files that need to be split into chunks
+    // For now, return to standard method
+    return await this.transcribeAudio(audioPath, options);
   }
 }
 

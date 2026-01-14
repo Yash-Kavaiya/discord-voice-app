@@ -29,7 +29,7 @@ class VoiceTranscriptionBot {
   }
 
   validateConfig() {
-    const required = ['DISCORD_TOKEN', 'OPENAI_API_KEY'];
+    const required = ['DISCORD_TOKEN', 'GOOGLE_API_KEY'];
     const missing = required.filter(key => !process.env[key]);
 
     if (missing.length > 0) {
@@ -54,7 +54,7 @@ class VoiceTranscriptionBot {
   initializeServices() {
     // Initialize all services
     this.audioRecorder = new AudioRecorder();
-    this.transcriptionService = new TranscriptionService(process.env.OPENAI_API_KEY);
+    this.transcriptionService = new TranscriptionService(process.env.GOOGLE_API_KEY);
     this.analyticsEngine = new AnalyticsEngine(this.db);
     this.reportGenerator = new ReportGenerator(this.db);
 
